@@ -1,0 +1,71 @@
+import logging
+import json
+import os
+import tempfile
+import azure.functions as func
+from azure.core.credentials import AzureKeyCredential
+from azure.ai.formrecognizer import FormRecognizerClient
+from azure.ai.formrecognizer import DocumentAnalysisClient
+
+def main(req: func.HttpRequest) -> func.HttpResponse:
+    # Set up logging
+    logging.info('Python HTTP trigger function processed a request.')
+
+    # Initialize Form Recognizer client
+    subscription_key = "c9b00785b0154b6c8f399564fc2dc2d6"
+    endpoint = "https://cog-fr-igv2zmlceav2g.cognitiveservices.azure.com/"
+    credential = AzureKeyCredential(subscription_key)
+    form_recognizer_client = FormRecognizerClient(endpoint, credential)
+    document_analysis_client = DocumentAnalysisClient(endpoint=endpoint, credential=credential)
+
+    # Check if the request has a body
+    if not req.get_body():
+        return func.HttpResponse("No image data found in the request body", status_code=400)
+
+    try:
+        # Get the image data from the request body
+        image_data = req.get_body()
+        length = len(image_data)
+        logging.info(f'Length of this bytes object is {length}.')
+    except Exception as e:
+        return func.HttpResponse(f"An error occurred: {str(e)}", status_code=500)
+
+    try:
+        poller = document_analysis_client.begin_analyze_document("prebuilt-document", image_data)
+        result = poller.result()
+
+        key_value_pairs = []
+
+        logging.info("----Key-value pairs found in document----")
+        for kv_pair in result.key_value_pairs:
+            if kv_pair.key and kv_pair.value:
+                key = kv_pair.key.content
+                value = kv_pair.value.content
+                key_value_pairs.append({'key': key, 'value': value})
+                logging.info("Key '{}': Value: '{}'".format(key, value))
+            else:
+                key = kv_pair.key.content
+                key_value_pairs.append({'key': key, 'value': ''})
+                logging.info("Key '{}': Value:".format(key))
+
+        logging.info("----------------------------------------")
+
+        response_data = {
+            'key_value_pairs': key_value_pairs
+        }
+
+        json_data = json.dumps(response_data)
+
+        return func.HttpResponse(
+            json_data,
+            mimetype='application/json',
+            status_code=200)
+
+    except Exception as e:
+        logging.error(f"An error occurred: {str(e)}")
+        return func.HttpResponse(
+            "An error occurred during processing.",
+            status_code=500
+        )
+
+
